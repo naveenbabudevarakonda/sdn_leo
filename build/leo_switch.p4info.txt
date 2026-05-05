@@ -1,0 +1,246 @@
+# proto-file: p4/config/v1/p4info.proto
+# proto-message: p4.config.v1.P4Info
+
+pkg_info {
+  arch: "v1model"
+}
+tables {
+  preamble {
+    id: 37375156
+    name: "MyIngress.ipv4_lpm"
+    alias: "ipv4_lpm"
+  }
+  match_fields {
+    id: 1
+    name: "hdr.ipv4.dstAddr"
+    bitwidth: 32
+    match_type: LPM
+  }
+  action_refs {
+    id: 21558193
+  }
+  action_refs {
+    id: 17164597
+  }
+  action_refs {
+    id: 32028059
+  }
+  action_refs {
+    id: 22951156
+  }
+  action_refs {
+    id: 22411635
+  }
+  initial_default_action {
+    action_id: 22411635
+  }
+  size: 1024
+}
+tables {
+  preamble {
+    id: 39426598
+    name: "MyIngress.node_config"
+    alias: "node_config"
+  }
+  match_fields {
+    id: 1
+    name: "std_meta.ingress_port"
+    bitwidth: 9
+    match_type: EXACT
+  }
+  action_refs {
+    id: 23137566
+  }
+  action_refs {
+    id: 21257015
+  }
+  initial_default_action {
+    action_id: 21257015
+  }
+  size: 64
+}
+actions {
+  preamble {
+    id: 21257015
+    name: "NoAction"
+    alias: "NoAction"
+    annotations: "@noWarn(\"unused\")"
+  }
+}
+actions {
+  preamble {
+    id: 21558193
+    name: "MyIngress.do_forward"
+    alias: "do_forward"
+  }
+  params {
+    id: 1
+    name: "port"
+    bitwidth: 9
+  }
+}
+actions {
+  preamble {
+    id: 22411635
+    name: "MyIngress.do_drop"
+    alias: "do_drop"
+  }
+}
+actions {
+  preamble {
+    id: 17164597
+    name: "MyIngress.insert_trace"
+    alias: "insert_trace"
+  }
+  params {
+    id: 1
+    name: "port"
+    bitwidth: 9
+  }
+}
+actions {
+  preamble {
+    id: 32028059
+    name: "MyIngress.stamp_sat"
+    alias: "stamp_sat"
+  }
+  params {
+    id: 1
+    name: "sat_id"
+    bitwidth: 16
+  }
+  params {
+    id: 2
+    name: "port"
+    bitwidth: 9
+  }
+}
+actions {
+  preamble {
+    id: 22951156
+    name: "MyIngress.strip_trace"
+    alias: "strip_trace"
+  }
+  params {
+    id: 1
+    name: "port"
+    bitwidth: 9
+  }
+}
+actions {
+  preamble {
+    id: 23137566
+    name: "MyIngress.set_role"
+    alias: "set_role"
+  }
+  params {
+    id: 1
+    name: "role"
+    bitwidth: 8
+  }
+  params {
+    id: 2
+    name: "node_id"
+    bitwidth: 16
+  }
+}
+counters {
+  preamble {
+    id: 309115653
+    name: "MyIngress.port_bytes"
+    alias: "port_bytes"
+  }
+  spec {
+    unit: BYTES
+  }
+  size: 512
+}
+digests {
+  preamble {
+    id: 389983755
+    name: "path_digest_t"
+    alias: "path_digest_t"
+  }
+  type_spec {
+    struct {
+      name: "path_digest_t"
+    }
+  }
+}
+type_info {
+  structs {
+    key: "path_digest_t"
+    value {
+      members {
+        name: "src_ip"
+        type_spec {
+          bitstring {
+            bit {
+              bitwidth: 32
+            }
+          }
+        }
+      }
+      members {
+        name: "dst_ip"
+        type_spec {
+          bitstring {
+            bit {
+              bitwidth: 32
+            }
+          }
+        }
+      }
+      members {
+        name: "hop_count"
+        type_spec {
+          bitstring {
+            bit {
+              bitwidth: 8
+            }
+          }
+        }
+      }
+      members {
+        name: "sat0"
+        type_spec {
+          bitstring {
+            bit {
+              bitwidth: 16
+            }
+          }
+        }
+      }
+      members {
+        name: "sat1"
+        type_spec {
+          bitstring {
+            bit {
+              bitwidth: 16
+            }
+          }
+        }
+      }
+      members {
+        name: "sat2"
+        type_spec {
+          bitstring {
+            bit {
+              bitwidth: 16
+            }
+          }
+        }
+      }
+      members {
+        name: "ingress_port"
+        type_spec {
+          bitstring {
+            bit {
+              bitwidth: 9
+            }
+          }
+        }
+      }
+    }
+  }
+}

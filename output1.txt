@@ -1,0 +1,62 @@
+p4@p4dev:~/Naveen/SDN_courseProject$ python3 hypatia_driver.py 
+Found 200 fstate files in /home/p4/Naveen/SDN_courseProject/hypatia/paper/satellite_networks_state/gen_data/telesat_1015_isls_plus_grid_ground_stations_top_100_algorithm_free_one_only_over_isls/dynamic_state_1000ms_for_200s
+=== Loading Hypatia Telesat topology snapshots ===
+
+Loaded 100 ground stations
+Loaded 702 ISLs
+
+Max ISL delay (avg): 12.0 ms
+Max GSL delay (avg): 9.7 ms
+  t=  0s -> 356 nodes, 1414 edges
+  t= 25s -> 67 nodes, 78 edges
+  t= 50s -> 62 nodes, 70 edges
+  t= 75s -> 58 nodes, 68 edges
+  t=100s -> 81 nodes, 104 edges
+  t=125s -> 72 nodes, 76 edges
+  t=150s -> 82 nodes, 86 edges
+  t=175s -> 65 nodes, 70 edges
+
+Loaded 200 snapshots total.
+
+=== Verifying routing at t=0 ===
+Graph: 356 nodes, 1414 edges
+Our GS node IDs: [351, 352, 353, 354, 355]
+
+Path Tokyo(node 351) -> Delhi(node 352):
+  Hops: [351, 31, 352]
+  Total delay: 19.5 ms
+
+Forwarding table entry for node 351:
+  Next hop to 352: 31
+
+=== GS pair delays at t=0 ===
+Source               Destination             Delay(ms)   Hops
+--------------------------------------------------------------
+Tokyo                Delhi                        19.5      2
+Tokyo                Shanghai                     31.5      3
+Tokyo                São-Paulo                    91.5      8
+Tokyo                Mumbai-(Bombay)              31.5      3
+Delhi                Tokyo                        19.5      2
+Delhi                Shanghai                     31.5      3
+Delhi                São-Paulo                    91.5      8
+Delhi                Mumbai-(Bombay)              31.5      3
+Shanghai             Tokyo                        31.5      3
+Shanghai             Delhi                        31.5      3
+Shanghai             São-Paulo                    79.5      7
+Shanghai             Mumbai-(Bombay)              43.5      4
+São-Paulo            Tokyo                        91.5      8
+São-Paulo            Delhi                        91.5      8
+São-Paulo            Shanghai                     79.5      7
+São-Paulo            Mumbai-(Bombay)             103.5      9
+Mumbai-(Bombay)      Tokyo                        31.5      3
+Mumbai-(Bombay)      Delhi                        31.5      3
+Mumbai-(Bombay)      Shanghai                     43.5      4
+Mumbai-(Bombay)      São-Paulo                   103.5      9
+
+Saved delay_over_time.png (Tokyo -> Delhi)
+
+=== Step 2 COMPLETE ===
+snapshots list is ready to pass to the controller in Step 6.
+(p4dev-python-venv) p4@p4dev:~/Naveen/SDN_courseProject$ 
+
+
