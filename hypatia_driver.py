@@ -11,13 +11,11 @@ import matplotlib
 matplotlib.use('Agg')   # non-interactive backend, works without display
 import matplotlib.pyplot as plt
 
+PWD=os.path.dirname(os.path.realpath(__file__))
+
 # ── Configuration (confirmed paths) ─────────────────────────
-BASE_DIR = (
-    "/home/p4/Naveen/SDN_courseProject/hypatia/paper/"
-    "satellite_networks_state/gen_data/"
-    "telesat_1015_isls_plus_grid_ground_stations_top_100"
-    "_algorithm_free_one_only_over_isls"
-)
+BASE_DIR = PWD+"/hypatia/paper/satellite_networks_state/gen_data/telesat_1015_isls_plus_grid_ground_stations_top_100_algorithm_free_one_only_over_isls"
+
 DYNAMIC_DIR  = os.path.join(BASE_DIR, "dynamic_state_1000ms_for_200s")
 GS_FILE      = os.path.join(BASE_DIR, "ground_stations.txt")
 ISLS_FILE    = os.path.join(BASE_DIR, "isls.txt")
@@ -197,9 +195,9 @@ def build_graph(fwd_table, active_edges, isls,
     # Only add satellites that appear in active edges to keep graph small
     active_sats = set()
     for (src, dst) in active_edges:
-        if src < num_sats:
+        if src < num_sats:  # if src is a satellite (not a GS)
             active_sats.add(src)
-        if dst < num_sats:
+        if dst < num_sats:  # if dst is a satellite (not a GS)
             active_sats.add(dst)
 
     for (sat_a, sat_b) in isls:
