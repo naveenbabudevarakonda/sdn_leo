@@ -7,8 +7,9 @@ from mininet.node   import Host, Switch
 from mininet.link   import TCLink
 from mininet.log    import setLogLevel, info, error
 
-P4_JSON = os.path.abspath("build/leo_switch.json")
-P4_INFO = os.path.abspath("build/leo_switch.p4info.txt")
+PWD=os.path.dirname(os.path.realpath(__file__))
+P4_JSON = PWD+"/build/leo_switch.json"
+P4_INFO = PWD+"/build/leo_switch.p4info.txt"
 
 # Node IDs match Hypatia Telesat numbering
 # Tokyo=GS351, Sao Paulo=GS354 (longer path = more handovers)

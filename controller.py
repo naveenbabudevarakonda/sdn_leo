@@ -21,17 +21,14 @@ from p4.v1  import p4runtime_pb2, p4runtime_pb2_grpc
 from p4.config.v1 import p4info_pb2
 import google.protobuf.text_format as text_format
 
+PWD=os.path.dirname(os.path.realpath(__file__))
+
 # ── Paths ─────────────────────────────────────────────────────
-BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+BASE_DIR = PWD
 P4INFO   = os.path.join(BASE_DIR, "build/leo_switch.p4info.txt")
 P4JSON   = os.path.join(BASE_DIR, "build/leo_switch.json")
 
-HYPATIA_BASE = (
-    "/home/p4/Naveen/SDN_courseProject/hypatia/paper/"
-    "satellite_networks_state/gen_data/"
-    "telesat_1015_isls_plus_grid_ground_stations_top_100"
-    "_algorithm_free_one_only_over_isls"
-)
+HYPATIA_BASE = PWD+"/hypatia/paper/satellite_networks_state/gen_data/telesat_1015_isls_plus_grid_ground_stations_top_100_algorithm_free_one_only_over_isls"
 DYNAMIC_DIR = os.path.join(
     HYPATIA_BASE, "dynamic_state_1000ms_for_200s"
 )
