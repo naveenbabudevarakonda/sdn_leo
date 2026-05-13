@@ -386,6 +386,97 @@ def print_gs_pair_summary(snapshots, gs_info):
             except (nx.NetworkXNoPath, nx.NodeNotFound):
                 print(f"{sname:<20} {dname:<20} {'NO PATH':>12} {'-':>6}")
 
+
+def plot_forwarding_graph(fwd_table, filename="forwarding_graph.png"):
+
+    import networkx as nx
+    import matplotlib.pyplot as plt
+
+    FG = nx.DiGraph()
+
+    # Build forwarding graph
+    for current in fwd_table:
+
+        for dst, next_hop in fwd_table[current].items():
+
+            FG.add_edge(current, next_hop)
+
+    # Node colors
+    colors = []
+
+    for n in FG.nodes():
+
+        if n < NUM_SATS:
+            colors.append("skyblue")   # satellite
+        else:
+            colors.append("red")       # ground station
+
+    plt.figure(figsize=(14,14))
+
+    pos = nx.spring_layout(FG, seed=42)
+
+    nx.draw(
+        FG,
+        pos,
+        node_color=colors,
+        with_labels=True,
+        node_size=250,
+        font_size=7,
+        arrows=True
+    )
+
+    plt.title("Forwarding Graph")
+
+    plt.savefig(filename, dpi=150)
+
+    print(f"Saved {filename}")
+
+
+def plot_forwarding_for_destination(
+        fwd_table,
+        destination,
+        filename="forwarding_dst.png"
+):
+
+    FG = nx.DiGraph()
+
+    for current in fwd_table:
+
+        if destination in fwd_table[current]:
+
+            next_hop = fwd_table[current][destination]
+
+            FG.add_edge(current, next_hop)
+
+    colors = []
+
+    for n in FG.nodes():
+
+        if n < NUM_SATS:
+            colors.append("skyblue")
+        else:
+            colors.append("red")
+
+    plt.figure(figsize=(12,12))
+
+    pos = nx.spring_layout(FG, seed=42)
+
+    nx.draw(
+        FG,
+        pos,
+        node_color=colors,
+        with_labels=True,
+        node_size=300,
+        font_size=8,
+        arrows=True
+    )
+
+    plt.title(f"Forwarding toward node {destination}")
+
+    plt.savefig(filename, dpi=150)
+
+    print(f"Saved {filename}")
+
 # ── Entry point ──────────────────────────────────────────────
 if __name__ == '__main__':
 
@@ -404,6 +495,40 @@ if __name__ == '__main__':
 
     # Load everything
     snapshots, gs_info = load_all_snapshots()
+
+
+    ####################################
+    colors = []
+    G = snapshots[0]['graph']
+    for n in G.nodes():
+        if G.nodes[n]['node_type'] == 'satellite':
+            colors.append('skyblue')
+        else:
+            colors.append('red')
+
+    plt.figure(figsize=(12,12))
+
+    pos = nx.spring_layout(G)
+
+    nx.draw(
+        G,
+        pos,
+        node_color=colors,
+        with_labels=True,
+        node_size=300,
+        font_size=8
+    )
+
+    plt.savefig(PWD+"/graph_colored.png")
+
+    ########################################
+
+    #plot_forwarding_graph(snapshots[0]['fwd_table'], filename="forwarding_graph.png")
+    plot_forwarding_for_destination(
+        snapshots[0]['fwd_table'],
+        destination=NUM_SATS + OUR_GS_INDICES[1],
+        filename="forwarding_to_dst.png"
+    )
 
     # Run verification checks
     verify_routing(snapshots, gs_info)
