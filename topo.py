@@ -10,31 +10,114 @@ from mininet.log    import setLogLevel, info, error
 PWD=os.path.dirname(os.path.realpath(__file__))
 P4_JSON = PWD+"/build/leo_switch.json"
 P4_INFO = PWD+"/build/leo_switch.p4info.txt"
+HYPATIA_BASE = (
+    PWD+"/hypatia/paper/satellite_networks_state/gen_data/"
+    "telesat_1015_isls_plus_grid_ground_stations_top_100_"
+    "algorithm_free_one_only_over_isls"
+)
+ISLS_FILE = os.path.join(HYPATIA_BASE, 'isls.txt')
 
-# Node IDs match Hypatia Telesat numbering
-# Tokyo=GS351, Sao Paulo=GS354 (longer path = more handovers)
-NODE_IDS = {
-    'gs1' : 351,   # Tokyo
-    'sat1': 14,
-    'sat2': 15,
-    'gs2' : 354,   # Sao Paulo  ← changed from 352 (Delhi)
+DEFAULT_GROUND_NODE_IDS = {
+    'gs1': 351,   # Tokyo
+    'gs2': 354,   # Sao Paulo
 }
+NUM_SATELLITES = 351
+THRIFT_BASE_PORT = 9091
+GRPC_BASE_PORT = 50051
+HOST_LINK_DELAY_MS = 1
+DEFAULT_GSL_DELAY_MS = 10
+DEFAULT_ISL_DELAY_MS = 14
 
-THRIFT_PORTS = {
-    'gs1': 9091, 'sat1': 9092, 'sat2': 9093, 'gs2': 9094
-}
-GRPC_PORTS = {
-    'gs1': 50051, 'sat1': 50052, 'sat2': 50053, 'gs2': 50054
-}
 
-# Initial link delays — will be updated dynamically
-INITIAL_DELAYS = {
-    ('h1',   'gs1') : 1,
-    ('gs1',  'sat1'): 10,
-    ('sat1', 'sat2'): 14,
-    ('sat2', 'gs2') : 10,
-    ('gs2',  'h2')  : 1,
-}
+def node_name_for_id(node_id, ground_node_ids=None):
+    if ground_node_ids is None:
+        ground_node_ids = DEFAULT_GROUND_NODE_IDS
+    if node_id == ground_node_ids['gs1']:
+        return 'gs1'
+    if node_id == ground_node_ids['gs2']:
+        return 'gs2'
+    if 0 <= node_id < NUM_SATELLITES:
+        return f'sat{node_id}'
+    raise ValueError(f'Unsupported node id: {node_id}')
+
+
+def node_id_for_name(name, ground_node_ids=None):
+    if ground_node_ids is None:
+        ground_node_ids = DEFAULT_GROUND_NODE_IDS
+    if name in ground_node_ids:
+        return ground_node_ids[name]
+    if name.startswith('sat'):
+        return int(name[3:])
+    raise ValueError(f'Unsupported node name: {name}')
+
+
+def satellite_names():
+    return [f'sat{sat_id}' for sat_id in range(NUM_SATELLITES)]
+
+
+def load_isls(isls_file=ISLS_FILE):
+    isls = []
+
+    if not os.path.exists(isls_file):
+        raise FileNotFoundError(f'ISLs file not found: {isls_file}')
+
+    with open(isls_file) as f:
+        for line in f:
+            parts = line.strip().split()
+            if len(parts) != 2:
+                continue
+            isls.append((int(parts[0]), int(parts[1])))
+
+    return isls
+
+
+def build_switch_configs(ground_node_ids=None):
+    if ground_node_ids is None:
+        ground_node_ids = DEFAULT_GROUND_NODE_IDS
+    sat_names = satellite_names()
+    switch_names = ['gs1', 'gs2', *sat_names]
+    node_ids = dict(ground_node_ids)
+    for sat_id in range(NUM_SATELLITES):
+        node_ids[f'sat{sat_id}'] = sat_id
+    thrift_ports = {
+        name: THRIFT_BASE_PORT + idx
+        for idx, name in enumerate(switch_names)
+    }
+    grpc_ports = {
+        name: GRPC_BASE_PORT + idx
+        for idx, name in enumerate(switch_names)
+    }
+
+    return {
+        'num_satellites': NUM_SATELLITES,
+        'satellite_switches': sat_names,
+        'switch_names': switch_names,
+        'node_ids': node_ids,
+        'thrift_ports': thrift_ports,
+        'grpc_ports': grpc_ports,
+    }
+
+
+def build_constellation_edges(potential_gsl_sat_ids):
+    isls = load_isls()
+    edges = []
+    for sat_a, sat_b in isls:
+        edges.append((f'sat{sat_a}', f'sat{sat_b}',
+                      DEFAULT_ISL_DELAY_MS))
+
+    for sat_id in sorted(potential_gsl_sat_ids):
+        sat_name = f'sat{sat_id}'
+        edges.append(('gs1', sat_name, DEFAULT_GSL_DELAY_MS))
+        edges.append((sat_name, 'gs2', DEFAULT_GSL_DELAY_MS))
+
+    return edges
+
+
+def path_to_switch_names(path, ground_node_ids=None):
+    return [
+        node_name_for_id(node_id, ground_node_ids)
+        for node_id in path
+    ]
 
 
 # ============================================================
@@ -88,7 +171,7 @@ class BMv2Switch(Switch):
             stdout=self.log_f,
             stderr=self.log_f
         )
-        time.sleep(2)
+        #time.sleep(2)
 
         if self.sw_proc.poll() is not None:
             error(f'ERROR: {self.name} died. '
@@ -121,37 +204,14 @@ def thrift_cmd(thrift_port, commands):
     return out.stdout
 
 
-def install_all_rules(switches):
-    """Install initial forwarding rules via Thrift CLI."""
-    print("\n=== Installing initial forwarding rules ===")
-
-    rules = {
-        'gs1' : [
-            'table_add ipv4_lpm do_forward 10.0.2.1/32 => 2',
-            'table_add ipv4_lpm do_forward 10.0.1.1/32 => 1',
-        ],
-        'sat1': [
-            'table_add ipv4_lpm do_forward 10.0.2.1/32 => 2',
-            'table_add ipv4_lpm do_forward 10.0.1.1/32 => 1',
-        ],
-        'sat2': [
-            'table_add ipv4_lpm do_forward 10.0.2.1/32 => 2',
-            'table_add ipv4_lpm do_forward 10.0.1.1/32 => 1',
-        ],
-        'gs2' : [
-            'table_add ipv4_lpm do_forward 10.0.2.1/32 => 2',
-            'table_add ipv4_lpm do_forward 10.0.1.1/32 => 1',
-        ],
-    }
-
-    for sw_name, cmds in rules.items():
-        out = thrift_cmd(THRIFT_PORTS[sw_name], cmds)
-        for line in out.splitlines():
-            if any(k in line for k in
-                   ['Adding', 'handle', 'Error']):
-                print(f'  [{sw_name}] {line.strip()}')
-
-    print("Initial rules installed.\n")
+def install_all_rules(*args, **kwargs):
+    """
+    Compatibility shim.
+    The full-constellation mode now installs path-specific rules
+    from the controller after links are activated.
+    """
+    print('\nSkipping static Thrift rule installation.')
+    print('Path-specific rules will be pushed by the controller.\n')
 
 
 # ============================================================
@@ -176,11 +236,70 @@ def update_link_delay(net, node_a, node_b, delay_ms):
               f'{node_b}: {e}')
 
 
+def collect_neighbor_ports(net, switches):
+    neighbor_ports = {}
+    for sw_name, sw in switches.items():
+        ports = {}
+        for intf_name, port_no in sw.port_map.items():
+            intf = sw.intfs[port_no]
+            link = getattr(intf, 'link', None)
+            if link is None:
+                continue
+            peer = link.intf1 if link.intf2 == intf else link.intf2
+            ports[peer.node.name] = port_no
+        neighbor_ports[sw_name] = ports
+    net.leo_config['neighbor_ports'] = neighbor_ports
+    return neighbor_ports
+
+
+def set_link_enabled(net, node_a, node_b, enabled):
+    try:
+        na = net.get(node_a)
+        nb = net.get(node_b)
+        links = net.linksBetween(na, nb)
+        if not links:
+            return
+        state = 'up' if enabled else 'down'
+        links[0].intf1.ifconfig(state)
+        links[0].intf2.ifconfig(state)
+    except Exception as e:
+        print(f'  WARNING: link state {node_a}<->{node_b}: {e}')
+
+
+def initialize_link_states(net):
+    for node_a, node_b in net.leo_config['dynamic_edges']:
+        set_link_enabled(net, node_a, node_b, False)
+    net.leo_config['active_dynamic_edges'] = set()
+
+
+def activate_path_links(net, path):
+    switch_path = path_to_switch_names(
+        path,
+        net.leo_config.get('ground_node_ids'),
+    )
+    desired_edges = {
+        tuple(sorted((left, right)))
+        for left, right in zip(switch_path, switch_path[1:])
+    }
+    active_edges = net.leo_config.get('active_dynamic_edges', set())
+
+    for edge in sorted(active_edges - desired_edges):
+        set_link_enabled(net, edge[0], edge[1], False)
+
+    for edge in sorted(desired_edges - active_edges):
+        set_link_enabled(net, edge[0], edge[1], True)
+
+    net.leo_config['active_dynamic_edges'] = desired_edges
+    return switch_path
+
+
 # ============================================================
 # Build network
 # ============================================================
 
-def build_network():
+def build_network(potential_gsl_sat_ids=None,
+                  ground_node_ids=None,
+                  ground_labels=None):
     """Build and return the Mininet network."""
     for fpath, label in [
         (P4_JSON, 'leo_switch.json'),
@@ -195,6 +314,15 @@ def build_network():
             sys.exit(1)
 
     net = Mininet(controller=None, host=Host, link=TCLink)
+    if ground_node_ids is None:
+        ground_node_ids = dict(DEFAULT_GROUND_NODE_IDS)
+    topo_cfg = build_switch_configs(ground_node_ids=ground_node_ids)
+    if potential_gsl_sat_ids is None:
+        potential_gsl_sat_ids = set()
+    potential_gsl_sat_ids = set(potential_gsl_sat_ids)
+    constellation_edges = build_constellation_edges(
+        potential_gsl_sat_ids
+    )
 
     # Both hosts on /16 — kernel sends packets without gateway
     h1 = net.addHost('h1', ip='10.0.1.1/16',
@@ -203,28 +331,41 @@ def build_network():
                      mac='00:00:00:00:02:01')
 
     switches = {}
-    for name in ['gs1', 'sat1', 'sat2', 'gs2']:
+    for name in topo_cfg['switch_names']:
         sw = net.addSwitch(
             name,
             cls=BMv2Switch,
             json_path=P4_JSON,
-            thrift_port=THRIFT_PORTS[name],
-            grpc_port=GRPC_PORTS[name],
-            node_id=NODE_IDS[name],
+            thrift_port=topo_cfg['thrift_ports'][name],
+            grpc_port=topo_cfg['grpc_ports'][name],
+            node_id=topo_cfg['node_ids'][name],
         )
         switches[name] = sw
 
-    # Link order determines port numbering inside BMv2
-    net.addLink(h1,              switches['gs1'],
-                delay=f"{INITIAL_DELAYS[('h1','gs1')]}ms")
-    net.addLink(switches['gs1'], switches['sat1'],
-                delay=f"{INITIAL_DELAYS[('gs1','sat1')]}ms")
-    net.addLink(switches['sat1'], switches['sat2'],
-                delay=f"{INITIAL_DELAYS[('sat1','sat2')]}ms")
-    net.addLink(switches['sat2'], switches['gs2'],
-                delay=f"{INITIAL_DELAYS[('sat2','gs2')]}ms")
+    node_objs = {'h1': h1, 'h2': h2, **switches}
+    net.addLink(h1, switches['gs1'],
+                delay=f'{HOST_LINK_DELAY_MS}ms')
     net.addLink(switches['gs2'], h2,
-                delay=f"{INITIAL_DELAYS[('gs2','h2')]}ms")
+                delay=f'{HOST_LINK_DELAY_MS}ms')
+
+    dynamic_edges = set()
+    for left, right, delay_ms in constellation_edges:
+        net.addLink(
+            node_objs[left],
+            node_objs[right],
+            delay=f'{delay_ms}ms'
+        )
+        dynamic_edges.add(tuple(sorted((left, right))))
+
+    topo_cfg['potential_gsl_sat_ids'] = sorted(potential_gsl_sat_ids)
+    topo_cfg['dynamic_edges'] = dynamic_edges
+    topo_cfg['ground_node_ids'] = dict(ground_node_ids)
+    topo_cfg['ground_labels'] = dict(ground_labels or {})
+    topo_cfg['always_on_edges'] = {
+        tuple(sorted(('h1', 'gs1'))),
+        tuple(sorted(('gs2', 'h2'))),
+    }
+    net.leo_config = topo_cfg
 
     return net, switches
 
@@ -256,8 +397,8 @@ if __name__ == '__main__':
     setLogLevel('info')
 
     print("=== Building LEO Mininet topology ===")
-    print(f"GS1 (node {NODE_IDS['gs1']}) = Tokyo")
-    print(f"GS2 (node {NODE_IDS['gs2']}) = Sao Paulo")
+    print(f"GS1 (node {DEFAULT_GROUND_NODE_IDS['gs1']}) = Tokyo")
+    print(f"GS2 (node {DEFAULT_GROUND_NODE_IDS['gs2']}) = Sao Paulo")
 
     net, switches = build_network()
     net.start()
@@ -281,27 +422,24 @@ if __name__ == '__main__':
         net.stop()
         sys.exit(1)
 
+    collect_neighbor_ports(net, switches)
+    initialize_link_states(net)
+
     print("\n=== Port maps ===")
-    for name, sw in switches.items():
+    for name, sw in list(switches.items())[:8]:
         print(f"  {name}: {sw.port_map}")
+    print(f"  ... total switches: {len(switches)}")
 
     install_all_rules(switches)
     time.sleep(1)
 
-    loss = verify_connectivity(net)
-
-    if loss == 0.0:
-        print("\nSUCCESS: Network working.")
-        print("\nNetwork is running. Press Ctrl+C to stop.")
-        print("Start controller.py or run_experiment.py "
-              "in another terminal.")
-        try:
-            signal.pause()
-        except KeyboardInterrupt:
-            pass
-    else:
-        print("\nConnectivity failed.")
-        print("Check /tmp/bmv2_gs1.log for errors.")
+    print("\nDynamic constellation links are down by default.")
+    print("Start run_experiment.py to activate the current "
+          "Hypatia path and install forwarding rules.")
+    try:
+        signal.pause()
+    except KeyboardInterrupt:
+        pass
 
     net.stop()
     print("Network stopped.")

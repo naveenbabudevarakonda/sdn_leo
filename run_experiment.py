@@ -19,14 +19,15 @@ import subprocess
 
 from mininet.log import setLogLevel
 
-# Import from our project files
 from topo import (
     build_network,
+    collect_neighbor_ports,
+    initialize_link_states,
     install_all_rules,
     verify_connectivity,
-    THRIFT_PORTS,
 )
 from controller import (
+    build_gs_context,
     load_snapshots,
     LEOController,
     TrafficGenerator,
@@ -35,10 +36,13 @@ from controller import (
     DYNAMIC_DIR,
     P4INFO,
     DURATION,
+    derive_potential_gsl_sat_ids,
+    satellite_count_bounds,
 )
 
 
-def run_single_policy(policy, no_traffic=False):
+def run_single_policy(policy, no_traffic=False,
+                      src_gs=None, dst_gs=None):
     """
     Build Mininet topology, connect controller,
     run dynamic experiment, save results.
@@ -46,29 +50,59 @@ def run_single_policy(policy, no_traffic=False):
     print(f'\n{"="*60}')
     print(f'EXPERIMENT: {policy.upper()}')
     print(f'{"="*60}')
-    print(f'Tokyo (GS351) -> Sao Paulo (GS354)')
+    gs_ctx = build_gs_context(src_gs, dst_gs)
+    gs_labels = gs_ctx['labels']
+    gs_node_ids = gs_ctx['node_ids']
+
+    print(f'{gs_labels["gs1"]} (GS{gs_node_ids["gs1"]}) '
+          f'-> {gs_labels["gs2"]} (GS{gs_node_ids["gs2"]})')
     print(f'Duration: {DURATION}s, Dynamic delay updates: YES')
     print(f'{"="*60}\n')
 
-    setLogLevel('warning')  # suppress Mininet noise
+    setLogLevel('warning')
 
-    # In run_single_policy(), before build_network()
     print('Cleaning up any previous Mininet state...')
-    subprocess.run(['mn', '-c'],
-                capture_output=True)
+    subprocess.run(['mn', '-c'], capture_output=True)
     subprocess.run(['pkill', '-f', 'simple_switch_grpc'],
-                capture_output=True)
+                   capture_output=True)
     time.sleep(2)
 
-    # ── Step 1: Build and start Mininet ──────────────────────
+    print('=== Loading Hypatia topology snapshots ===')
+    if not os.path.exists(DYNAMIC_DIR):
+        print(f'ERROR: {DYNAMIC_DIR}')
+        sys.exit(1)
+
+    snapshots = load_snapshots(
+        DYNAMIC_DIR,
+        duration=DURATION,
+        gs_node_ids=gs_node_ids,
+        gs_labels=gs_labels,
+    )
+    min_sats, max_sats = satellite_count_bounds(snapshots)
+    potential_gsl_sat_ids = derive_potential_gsl_sat_ids(
+        snapshots,
+        gs_node_ids=gs_node_ids,
+    )
+
     print('=== Building Mininet topology ===')
-    net, switches = build_network()
+    print(f'Logical satellite-count range: '
+          f'{min_sats}..{max_sats}')
+    print(f'Ground stations               : '
+          f'{gs_labels["gs1"]} -> {gs_labels["gs2"]}')
+    print('Emulated satellite switches   : 351')
+    print(f'Potential GSL satellites      : '
+          f'{sorted(potential_gsl_sat_ids)}')
+
+    net, switches = build_network(
+        potential_gsl_sat_ids=potential_gsl_sat_ids,
+        ground_node_ids=gs_node_ids,
+        ground_labels=gs_labels,
+    )
     net.start()
 
     print('\nWaiting for BMv2 switches to initialise...')
     time.sleep(4)
 
-    # Check all switches started
     all_ok = True
     for name, sw in switches.items():
         if not sw.is_running():
@@ -81,31 +115,12 @@ def run_single_policy(policy, no_traffic=False):
         sys.exit(1)
 
     print('All switches running.\n')
+    collect_neighbor_ports(net, switches)
+    initialize_link_states(net)
 
-    # ── Step 2: Install initial rules via Thrift ──────────────
     install_all_rules(switches)
     time.sleep(1)
 
-    # ── Step 3: Verify basic connectivity ─────────────────────
-    loss = verify_connectivity(net)
-    if loss > 0:
-        print(f'\nWARNING: Initial connectivity check failed '
-              f'({loss}% loss).')
-        print('Continuing anyway — controller will '
-              'install P4Runtime rules.\n')
-    else:
-        print('Connectivity OK.\n')
-
-    # ── Step 4: Load Hypatia snapshots ────────────────────────
-    print('=== Loading Hypatia topology snapshots ===')
-    if not os.path.exists(DYNAMIC_DIR):
-        print(f'ERROR: {DYNAMIC_DIR}')
-        net.stop()
-        sys.exit(1)
-
-    snapshots = load_snapshots(DYNAMIC_DIR, duration=DURATION)
-
-    # ── Step 5: Set up traffic generator ─────────────────────
     if no_traffic:
         tgen = None
         print('Traffic generation disabled (--no-traffic).\n')
@@ -117,23 +132,44 @@ def run_single_policy(policy, no_traffic=False):
                   'RTT measurement may fail.')
         print()
 
-    # ── Step 6: Connect P4Runtime controller ─────────────────
-    ctrl = LEOController(P4INFO, policy=policy)
+    ctrl = LEOController(
+        P4INFO,
+        policy=policy,
+        switch_addresses={
+            name: ('127.0.0.1', port)
+            for name, port in net.leo_config['grpc_ports'].items()
+        },
+        switch_device_ids=net.leo_config['node_ids'],
+        gs_node_ids=gs_node_ids,
+        gs_labels=gs_labels,
+    )
     ctrl.connect_all()
 
-    # ── Step 7: Run dynamic control loop ──────────────────────
-    # Pass `net` so controller can update link delays
+    initial_path = snapshots[0]['path']
+    if initial_path:
+        ctrl.apply_rules(initial_path,
+                         net.leo_config['neighbor_ports'])
+        ctrl.update_mininet_topology(net, initial_path)
+        time.sleep(1)
+
+    loss = verify_connectivity(net)
+    if loss > 0:
+        print(f'\nWARNING: Initial connectivity check failed '
+              f'({loss}% loss).')
+        print('Continuing anyway — dynamic control loop '
+              'will keep updating the active path.\n')
+    else:
+        print('Connectivity OK.\n')
+
     print('=== Starting dynamic control loop ===\n')
     measurements = ctrl.run(
         snapshots,
         traffic_gen=tgen,
-        net=net          # ← THIS enables dynamic delay updates
+        net=net
     )
 
-    # ── Step 8: Save results ──────────────────────────────────
-    save_results(measurements, policy)
+    save_results(measurements, policy, gs_labels=gs_labels)
 
-    # ── Step 9: Stop network ──────────────────────────────────
     print('\nStopping Mininet network...')
     net.stop()
     print('Network stopped.')
@@ -141,7 +177,7 @@ def run_single_policy(policy, no_traffic=False):
     return measurements
 
 
-def run_all_policies():
+def run_all_policies(src_gs=None, dst_gs=None):
     """Run all three policies back to back."""
     policies = ['shortest_path', 'load_aware', 'predictive']
 
@@ -153,25 +189,20 @@ def run_all_policies():
     for i, policy in enumerate(policies, 1):
         print(f'\n[{i}/3] Starting {policy}...')
         try:
-            run_single_policy(policy)
+            run_single_policy(policy, src_gs=src_gs,
+                              dst_gs=dst_gs)
         except Exception as e:
             print(f'ERROR in {policy}: {e}')
             print('Continuing to next policy...')
         finally:
-            # Give system time to clean up between runs
             print('Waiting 10s before next experiment...')
             time.sleep(10)
 
-    # Generate comparison plot
     print('\n=== Generating comparison plots ===')
     plot_comparison()
     print('\nAll experiments complete.')
     print('Results saved in results/')
 
-
-# ============================================================
-# Main
-# ============================================================
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(
@@ -198,6 +229,14 @@ if __name__ == '__main__':
         action='store_true',
         help='Only generate comparison plot from saved results'
     )
+    parser.add_argument(
+        '--src-gs',
+        help='Source ground station name, index, or node id'
+    )
+    parser.add_argument(
+        '--dst-gs',
+        help='Destination ground station name, index, or node id'
+    )
     args = parser.parse_args()
 
     if args.compare:
@@ -205,6 +244,7 @@ if __name__ == '__main__':
         sys.exit(0)
 
     if args.policy == 'all':
-        run_all_policies()
+        run_all_policies(args.src_gs, args.dst_gs)
     else:
-        run_single_policy(args.policy, args.no_traffic)
+        run_single_policy(args.policy, args.no_traffic,
+                          args.src_gs, args.dst_gs)
